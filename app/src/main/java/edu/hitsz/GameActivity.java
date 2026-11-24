@@ -28,9 +28,9 @@ public class GameActivity extends AppCompatActivity {
     public static final String EXTRA_DIFFICULTY = "extra_difficulty";
 
     private BaseGame game;
-    private MaterialButton btnBomb;
-    private MaterialButton btnHeal;
-    private MaterialButton btnRing;
+    private ImageButton btnBomb;
+    private ImageButton btnHeal;
+    private ImageButton btnRing;
     private View skillContainer;
     private View gameOverOverlay;
 
@@ -137,8 +137,8 @@ public class GameActivity extends AppCompatActivity {
 
     private void setSkillButtonsEnabled(boolean enabled) {
         float alpha = enabled ? 1.0f : 0.4f;
-        MaterialButton[] buttons = {btnBomb, btnHeal, btnRing};
-        for (MaterialButton button : buttons) {
+        ImageButton[] buttons = {btnBomb, btnHeal, btnRing};
+        for (ImageButton button : buttons) {
             button.setEnabled(enabled);
             button.setAlpha(alpha);
         }

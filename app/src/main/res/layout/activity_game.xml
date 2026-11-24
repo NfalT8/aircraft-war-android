@@ -32,64 +32,49 @@
         android:gravity="center_horizontal"
         android:orientation="vertical">
 
-        <com.google.android.material.button.MaterialButton
+        <ImageButton
             android:id="@+id/btnBomb"
             android:layout_width="60dp"
             android:layout_height="60dp"
             android:alpha="0.4"
+            android:background="@drawable/bg_skill_circle"
+            android:backgroundTint="#FFB300"
+            android:contentDescription="炸弹技能"
             android:enabled="false"
-            android:insetTop="0dp"
-            android:insetBottom="0dp"
-            android:minWidth="0dp"
-            android:minHeight="0dp"
-            android:text="爆"
-            android:textColor="#2A1A00"
-            android:textSize="22sp"
-            android:textStyle="bold"
-            app:backgroundTint="#FFB300"
-            app:cornerRadius="30dp"
-            app:strokeColor="#66FFFFFF"
-            app:strokeWidth="1dp" />
+            android:padding="15dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_skill_bomb"
+            android:tint="#2A1A00" />
 
-        <com.google.android.material.button.MaterialButton
+        <ImageButton
             android:id="@+id/btnHeal"
             android:layout_width="60dp"
             android:layout_height="60dp"
             android:layout_marginTop="12dp"
             android:alpha="0.4"
+            android:background="@drawable/bg_skill_circle"
+            android:backgroundTint="#4CD964"
+            android:contentDescription="回血技能"
             android:enabled="false"
-            android:insetTop="0dp"
-            android:insetBottom="0dp"
-            android:minWidth="0dp"
-            android:minHeight="0dp"
-            android:text="愈"
-            android:textColor="#06280F"
-            android:textSize="22sp"
-            android:textStyle="bold"
-            app:backgroundTint="#4CD964"
-            app:cornerRadius="30dp"
-            app:strokeColor="#66FFFFFF"
-            app:strokeWidth="1dp" />
+            android:padding="15dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_skill_heal"
+            android:tint="#06280F" />
 
-        <com.google.android.material.button.MaterialButton
+        <ImageButton
             android:id="@+id/btnRing"
             android:layout_width="60dp"
             android:layout_height="60dp"
             android:layout_marginTop="12dp"
             android:alpha="0.4"
+            android:background="@drawable/bg_skill_circle"
+            android:backgroundTint="#4DD0E1"
+            android:contentDescription="环射技能"
             android:enabled="false"
-            android:insetTop="0dp"
-            android:insetBottom="0dp"
-            android:minWidth="0dp"
-            android:minHeight="0dp"
-            android:text="环"
-            android:textColor="#00272B"
-            android:textSize="22sp"
-            android:textStyle="bold"
-            app:backgroundTint="#4DD0E1"
-            app:cornerRadius="30dp"
-            app:strokeColor="#66FFFFFF"
-            app:strokeWidth="1dp" />
+            android:padding="15dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_skill_ring"
+            android:tint="#00272B" />
 
     </LinearLayout>
 

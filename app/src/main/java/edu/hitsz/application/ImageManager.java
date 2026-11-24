@@ -29,6 +29,9 @@ import java.util.Map;
  */
 public class ImageManager {
 
+    // 英雄机视觉尺寸与碰撞体积的缩放比例
+    private static final float HERO_SCALE = 0.85f;
+
     private static final Map<String, Bitmap> CLASSNAME_IMAGE_MAP = new HashMap<>();
 
     public static Bitmap HERO_IMAGE;
@@ -53,7 +56,11 @@ public class ImageManager {
         // 防止系统按屏幕密度放大图片，保证逻辑坐标与素材像素一致
         options.inScaled = false;
 
-        HERO_IMAGE = decode(context, R.drawable.hero, options);
+        Bitmap heroBitmap = decode(context, R.drawable.hero, options);
+        HERO_IMAGE = Bitmap.createScaledBitmap(heroBitmap,
+                Math.round(heroBitmap.getWidth() * HERO_SCALE),
+                Math.round(heroBitmap.getHeight() * HERO_SCALE),
+                true);
         MOB_ENEMY_IMAGE = decode(context, R.drawable.mob, options);
         ELITE_ENEMY_IMAGE = decode(context, R.drawable.elite, options);
         HERO_BULLET_IMAGE = decode(context, R.drawable.bullet_hero, options);
