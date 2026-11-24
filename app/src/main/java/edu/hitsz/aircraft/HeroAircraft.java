@@ -32,8 +32,17 @@ public class HeroAircraft extends AbstractAircraft {
         this.effectEndTime = 0;
         this.isValid = true;
         this.strategy = new DirectShootStrategy();
+        resetPosition();
+    }
+
+    public void resetPosition() {
         this.locationX = GameConfig.WINDOW_WIDTH / 2;
         this.locationY = GameConfig.WINDOW_HEIGHT - ImageManager.HERO_IMAGE.getHeight();
+    }
+
+    public void clampToBounds() {
+        this.locationX = Math.max(0, Math.min(GameConfig.WINDOW_WIDTH, this.locationX));
+        this.locationY = Math.max(0, Math.min(GameConfig.WINDOW_HEIGHT, this.locationY));
     }
 
     private int energy = 0;

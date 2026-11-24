@@ -45,12 +45,24 @@ import java.util.List;
 
 /**
  * 游戏主循环：SurfaceView + 子线程，40ms 一帧。
- * 逻辑坐标固定为 512x768，绘制时等比缩放并居中。
+ * 按屏幕实际比例自适应逻辑分辨率，等比缩放铺满全屏。
  */
 public abstract class BaseGame extends SurfaceView implements SurfaceHolder.Callback, Runnable {
 
+    public enum BuffType {
+        SCATTER,
+        RING,
+        FREEZE
+    }
+
     public interface UiListener {
         void onEnergyFullChanged(boolean full);
+
+        void onBuffStarted(BuffType type, long durationMs);
+
+        void onBuffsCleared();
+
+        void onBossHpChanged(int hp, int maxHp);
 
         void onGameOver(int score);
     }
@@ -61,10 +73,12 @@ public abstract class BaseGame extends SurfaceView implements SurfaceHolder.Call
     private Thread gameThread;
     private volatile boolean running = false;
 
-    //逻辑坐标到屏幕坐标的缩放与偏移
-    private volatile float scale = 1f;
-    private volatile float offsetX = 0f;
-    private volatile float offsetY = 0f;
+    // 逻辑坐标到屏幕坐标的等比缩放系数与安全区偏移
+    private volatile float scale = 0f;
+    private volatile int topSafeInsetPx = 0;
+    private boolean heroPositionedForSurface = false;
+    private volatile boolean pendingHeroResetPosition = false;
+    private volatile boolean pendingHeroClamp = false;
 
     private int backGroundTop = 0;
     protected Bitmap backgroundImage;
@@ -126,6 +140,8 @@ public abstract class BaseGame extends SurfaceView implements SurfaceHolder.Call
 
     private UiListener uiListener;
     private boolean lastEnergyFull = false;
+    private int lastReportedBossHp = -1;
+    private int lastReportedBossMaxHp = -1;
 
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Rect backgroundDest = new Rect();
@@ -236,12 +252,34 @@ public abstract class BaseGame extends SurfaceView implements SurfaceHolder.Call
         }
     }
 
+    public void setTopSafeInsetPx(int topSafeInsetPx) {
+        this.topSafeInsetPx = Math.max(0, topSafeInsetPx);
+    }
+
     @Override
     public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
-        scale = Math.min(width / (float) GameConfig.WINDOW_WIDTH,
-                height / (float) GameConfig.WINDOW_HEIGHT);
-        offsetX = (width - GameConfig.WINDOW_WIDTH * scale) / 2f;
-        offsetY = (height - GameConfig.WINDOW_HEIGHT * scale) / 2f;
+        if (width <= 0 || height <= 0) {
+            return;
+        }
+        float baseAspect = GameConfig.BASE_HEIGHT / (float) GameConfig.BASE_WIDTH;
+        int logicalWidth;
+        int logicalHeight;
+        if (height / (float) width >= baseAspect) {
+            logicalWidth = GameConfig.BASE_WIDTH;
+            scale = width / (float) logicalWidth;
+            logicalHeight = (int) Math.ceil(height / scale);
+        } else {
+            logicalHeight = GameConfig.BASE_HEIGHT;
+            scale = height / (float) logicalHeight;
+            logicalWidth = (int) Math.ceil(width / scale);
+        }
+        GameConfig.updateSize(logicalWidth, logicalHeight);
+        if (!heroPositionedForSurface) {
+            heroPositionedForSurface = true;
+            pendingHeroResetPosition = true;
+        } else {
+            pendingHeroClamp = true;
+        }
     }
 
     @Override
@@ -267,26 +305,28 @@ public abstract class BaseGame extends SurfaceView implements SurfaceHolder.Call
         while (running) {
             long frameStart = System.currentTimeMillis();
 
-            if (gameOverFlag && restartRequested) {
-                restartRequested = false;
-                resetGame();
-            }
-            applyPendingHeroMove();
-            if (!gameOverFlag) {
-                action();
-            }
-
-            Canvas canvas = null;
-            try {
-                canvas = surfaceHolder.lockCanvas();
-                if (canvas != null) {
-                    drawFrame(canvas);
+            if (scale > 0f) {
+                if (gameOverFlag && restartRequested) {
+                    restartRequested = false;
+                    resetGame();
                 }
-            } catch (Exception e) {
-                e.printStackTrace();
-            } finally {
-                if (canvas != null) {
-                    surfaceHolder.unlockCanvasAndPost(canvas);
+                applyPendingHeroMove();
+                if (!gameOverFlag) {
+                    action();
+                }
+
+                Canvas canvas = null;
+                try {
+                    canvas = surfaceHolder.lockCanvas();
+                    if (canvas != null) {
+                        drawFrame(canvas);
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                } finally {
+                    if (canvas != null) {
+                        surfaceHolder.unlockCanvasAndPost(canvas);
+                    }
                 }
             }
 
@@ -319,6 +359,7 @@ public abstract class BaseGame extends SurfaceView implements SurfaceHolder.Call
         postProcessAction();
         checkResultAction();
         updateEnergyUi();
+        updateBossHpUi();
     }
 
     private void processUltimateRequests() {
@@ -345,6 +386,30 @@ public abstract class BaseGame extends SurfaceView implements SurfaceHolder.Call
         UiListener listener = uiListener;
         if (listener != null) {
             post(() -> listener.onEnergyFullChanged(full));
+        }
+    }
+
+    private void updateBossHpUi() {
+        int currentHp = -1;
+        int currentMaxHp = -1;
+        for (AbstractAircraft enemy : enemyAircrafts) {
+            if (enemy instanceof BossEnemy && !enemy.notValid()) {
+                currentHp = enemy.getHp();
+                currentMaxHp = enemy.getMaxHp();
+                break;
+            }
+        }
+        if (currentHp == lastReportedBossHp && currentMaxHp == lastReportedBossMaxHp) {
+            return;
+        }
+        lastReportedBossHp = currentHp;
+        lastReportedBossMaxHp = currentMaxHp;
+
+        final int reportHp = Math.max(0, currentHp);
+        final int reportMaxHp = Math.max(0, currentMaxHp);
+        UiListener listener = uiListener;
+        if (listener != null) {
+            post(() -> listener.onBossHpChanged(reportHp, reportMaxHp));
         }
     }
 
@@ -534,10 +599,10 @@ public abstract class BaseGame extends SurfaceView implements SurfaceHolder.Call
                     heroAircraft.increaseHp(10);
                 } else if (prop instanceof BulletProp) {
                     heroAircraft.setStrategy(new ScatterShootStrategy());
-                    applyFirepowerTimeout();
+                    applyFirepowerTimeout(BuffType.SCATTER, 5000);
                 } else if (prop instanceof BulletPlusProp) {
                     heroAircraft.setStrategy(new RingShootStrategy());
-                    applyFirepowerTimeout();
+                    applyFirepowerTimeout(BuffType.RING, 5000);
                 } else if (prop instanceof FreezeProp) {
                     FreezeProp freeze = (FreezeProp) prop;
                     for (AbstractAircraft enemy : enemyAircrafts) {
@@ -547,6 +612,7 @@ public abstract class BaseGame extends SurfaceView implements SurfaceHolder.Call
                         freeze.addObserver((GameObserver) bullet);
                     }
                     freeze.notifyObservers();
+                    notifyBuffStarted(BuffType.FREEZE, 5000);
                 } else if (prop instanceof BombProp) {
                     BombProp bomb = (BombProp) prop;
 
@@ -594,15 +660,18 @@ public abstract class BaseGame extends SurfaceView implements SurfaceHolder.Call
         if (heroAircraft.isEnergyFull()) {
             heroAircraft.resetEnergy();
             heroAircraft.setStrategy(new RingShootStrategy());
-            applyRingShootTimeout();
+            applyFirepowerTimeout(BuffType.RING, 7000);
         }
     }
 
-    private void applyRingShootTimeout() {
-        long duration = 7000;
+    /**
+     * 处理火力道具及环射大招的限时恢复逻辑
+     */
+    private void applyFirepowerTimeout(BuffType buffType, long duration) {
         long expectedEndTime = System.currentTimeMillis() + duration;
 
         heroAircraft.setEffectEndTime(expectedEndTime);
+        notifyBuffStarted(buffType, duration);
 
         new Thread(() -> {
             try {
@@ -617,26 +686,11 @@ public abstract class BaseGame extends SurfaceView implements SurfaceHolder.Call
         }).start();
     }
 
-    /**
-     * 处理火力道具的限时恢复逻辑
-     */
-    private void applyFirepowerTimeout() {
-        long duration = 5000;
-        long expectedEndTime = System.currentTimeMillis() + duration;
-
-        heroAircraft.setEffectEndTime(expectedEndTime);
-
-        new Thread(() -> {
-            try {
-                Thread.sleep(duration);
-
-                if (System.currentTimeMillis() >= heroAircraft.getEffectEndTime()) {
-                    heroAircraft.setStrategy(new DirectShootStrategy());
-                }
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-        }).start();
+    private void notifyBuffStarted(BuffType type, long durationMs) {
+        UiListener listener = uiListener;
+        if (listener != null) {
+            post(() -> listener.onBuffStarted(type, durationMs));
+        }
     }
 
     /**
@@ -713,9 +767,15 @@ public abstract class BaseGame extends SurfaceView implements SurfaceHolder.Call
         soundPool.setEnabled(musicEnabled);
 
         lastEnergyFull = false;
+        lastReportedBossHp = -1;
+        lastReportedBossMaxHp = -1;
         UiListener listener = uiListener;
         if (listener != null) {
-            post(() -> listener.onEnergyFullChanged(false));
+            post(() -> {
+                listener.onEnergyFullChanged(false);
+                listener.onBuffsCleared();
+                listener.onBossHpChanged(0, 0);
+            });
         }
     }
 
@@ -724,12 +784,13 @@ public abstract class BaseGame extends SurfaceView implements SurfaceHolder.Call
     //***********************
 
     private void drawFrame(Canvas canvas) {
+        if (scale <= 0f) {
+            return;
+        }
         canvas.drawColor(Color.BLACK);
 
         int saveCount = canvas.save();
-        canvas.translate(offsetX, offsetY);
         canvas.scale(scale, scale);
-        canvas.clipRect(0, 0, GameConfig.WINDOW_WIDTH, GameConfig.WINDOW_HEIGHT);
 
         // 绘制背景,图片滚动
         drawBackground(canvas);
@@ -758,17 +819,29 @@ public abstract class BaseGame extends SurfaceView implements SurfaceHolder.Call
         if (backgroundImage == null) {
             return;
         }
-        backgroundDest.set(0, backGroundTop - GameConfig.WINDOW_HEIGHT,
-                GameConfig.WINDOW_WIDTH, backGroundTop);
-        canvas.drawBitmap(backgroundImage, null, backgroundDest, null);
+        int imgWidth = backgroundImage.getWidth();
+        int imgHeight = backgroundImage.getHeight();
+        if (imgWidth <= 0 || imgHeight <= 0) {
+            return;
+        }
+        int tileWidth = GameConfig.WINDOW_WIDTH;
+        int tileHeight = Math.max(1, Math.round(tileWidth * (imgHeight / (float) imgWidth)));
 
-        backgroundDest.set(0, backGroundTop,
-                GameConfig.WINDOW_WIDTH, backGroundTop + GameConfig.WINDOW_HEIGHT);
-        canvas.drawBitmap(backgroundImage, null, backgroundDest, null);
+        if (backGroundTop >= tileHeight) {
+            backGroundTop %= tileHeight;
+        }
+
+        for (int y = backGroundTop - tileHeight; y < GameConfig.WINDOW_HEIGHT; y += tileHeight) {
+            if (y + tileHeight <= 0) {
+                continue;
+            }
+            backgroundDest.set(0, y, tileWidth, y + tileHeight);
+            canvas.drawBitmap(backgroundImage, null, backgroundDest, null);
+        }
 
         if (!gameOverFlag) {
             backGroundTop++;
-            if (backGroundTop >= GameConfig.WINDOW_HEIGHT) {
+            if (backGroundTop >= tileHeight) {
                 backGroundTop = 0;
             }
         }
@@ -790,9 +863,10 @@ public abstract class BaseGame extends SurfaceView implements SurfaceHolder.Call
 
     private void paintScoreAndLife(Canvas canvas) {
         final float left = 12f;
-        final float top = 12f;
+        final float topMarginPx = 30f * getResources().getDisplayMetrics().density;
+        final float top = (topSafeInsetPx + topMarginPx) / scale;
         final float right = 268f;
-        final float bottom = 124f;
+        final float bottom = top + 112f;
         final float radius = 16f;
 
         paint.setStyle(Paint.Style.FILL);
@@ -870,8 +944,8 @@ public abstract class BaseGame extends SurfaceView implements SurfaceHolder.Call
         if (scale <= 0f) {
             return;
         }
-        float x = (screenX - offsetX) / scale;
-        float y = (screenY - offsetY) / scale;
+        float x = screenX / scale;
+        float y = screenY / scale;
         if (x < 0 || x > GameConfig.WINDOW_WIDTH || y < 0 || y > GameConfig.WINDOW_HEIGHT) {
             // 防止超出边界
             return;
@@ -882,6 +956,14 @@ public abstract class BaseGame extends SurfaceView implements SurfaceHolder.Call
     }
 
     private void applyPendingHeroMove() {
+        if (pendingHeroResetPosition) {
+            pendingHeroResetPosition = false;
+            heroAircraft.resetPosition();
+        }
+        if (pendingHeroClamp) {
+            pendingHeroClamp = false;
+            heroAircraft.clampToBounds();
+        }
         if (heroMovePending) {
             heroMovePending = false;
             heroAircraft.setLocation(pendingHeroX, pendingHeroY);

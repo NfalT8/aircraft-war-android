@@ -2,11 +2,13 @@ package edu.hitsz;
 
 import android.os.Bundle;
 import android.view.View;
+import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.widget.ImageButton;
 import android.widget.TextView;
 
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
@@ -19,6 +21,8 @@ import edu.hitsz.application.GameDifficulty;
 import edu.hitsz.application.HardGame;
 import edu.hitsz.application.ImageManager;
 import edu.hitsz.application.NormalGame;
+import edu.hitsz.ui.BossHealthBarView;
+import edu.hitsz.ui.BuffCountdownView;
 
 /**
  * 游戏主界面：根据 Intent 中携带的难度创建对应的游戏场景。
@@ -33,6 +37,8 @@ public class GameActivity extends AppCompatActivity {
     private ImageButton btnRing;
     private View skillContainer;
     private View gameOverOverlay;
+    private BuffCountdownView buffCountdownView;
+    private BossHealthBarView bossHealthBar;
 
     private boolean musicEnabled = true;
 
@@ -49,9 +55,13 @@ public class GameActivity extends AppCompatActivity {
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT));
 
+        buffCountdownView = findViewById(R.id.buffCountdownView);
+        bossHealthBar = findViewById(R.id.bossHealthBar);
+
         setupMusicButton();
         setupSkillButtons();
         setupGameOverOverlay();
+        applyCutoutInsets();
 
         game.setUiListener(new BaseGame.UiListener() {
             @Override
@@ -60,9 +70,26 @@ public class GameActivity extends AppCompatActivity {
             }
 
             @Override
+            public void onBuffStarted(BaseGame.BuffType type, long durationMs) {
+                buffCountdownView.startBuff(type, durationMs);
+            }
+
+            @Override
+            public void onBuffsCleared() {
+                buffCountdownView.clearBuffs();
+            }
+
+            @Override
+            public void onBossHpChanged(int hp, int maxHp) {
+                bossHealthBar.updateBossHp(hp, maxHp);
+            }
+
+            @Override
             public void onGameOver(int score) {
                 TextView finalScore = findViewById(R.id.tvFinalScore);
                 finalScore.setText("得分 " + score);
+                buffCountdownView.clearBuffs();
+                bossHealthBar.hideImmediately();
                 skillContainer.setVisibility(View.GONE);
                 gameOverOverlay.setVisibility(View.VISIBLE);
             }
@@ -144,8 +171,34 @@ public class GameActivity extends AppCompatActivity {
         }
     }
 
+    private void applyCutoutInsets() {
+        View topRightContainer = findViewById(R.id.topRightContainer);
+        FrameLayout.LayoutParams rightParams =
+                (FrameLayout.LayoutParams) topRightContainer.getLayoutParams();
+        final int baseRightTopMargin = rightParams.topMargin;
+
+        FrameLayout.LayoutParams bossParams =
+                (FrameLayout.LayoutParams) bossHealthBar.getLayoutParams();
+        final int baseBossTopMargin = bossParams.topMargin;
+
+        View contentView = findViewById(android.R.id.content);
+        ViewCompat.setOnApplyWindowInsetsListener(contentView, (v, insets) -> {
+            int cutoutTop = insets.getInsets(WindowInsetsCompat.Type.displayCutout()).top;
+            rightParams.topMargin = baseRightTopMargin + cutoutTop;
+            topRightContainer.setLayoutParams(rightParams);
+            bossParams.topMargin = baseBossTopMargin + cutoutTop;
+            bossHealthBar.setLayoutParams(bossParams);
+            game.setTopSafeInsetPx(cutoutTop);
+            return insets;
+        });
+        ViewCompat.requestApplyInsets(contentView);
+    }
+
     private void enterImmersiveMode() {
         WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+        WindowManager.LayoutParams lp = getWindow().getAttributes();
+        lp.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+        getWindow().setAttributes(lp);
         WindowInsetsControllerCompat controller =
                 WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
         controller.hide(WindowInsetsCompat.Type.systemBars());

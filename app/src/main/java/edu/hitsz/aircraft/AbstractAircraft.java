@@ -58,6 +58,10 @@ public abstract class AbstractAircraft extends AbstractFlyingObject {
         return hp;
     }
 
+    public int getMaxHp() {
+        return maxHp;
+    }
+
     public static void setHpMultiplier(double multiplier) {
         hpMultiplier = multiplier;
     }
