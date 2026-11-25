@@ -11,22 +11,8 @@ public class ElitePlusEnemy extends AbstractAircraft implements GameObserver {
     }
 
     @Override
-    public void updateOnFreeze(){
-        int originalSpeedY = this.speedY;
-        int originalSpeedX = this.speedX;
-        this.speedY = 0;
-        this.speedX = 0;
-
-        // 开启多线程计时恢复
-        new Thread(() -> {
-            try {
-                Thread.sleep(3000);
-                this.speedY = originalSpeedY;
-                this.speedX = originalSpeedX;
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
-        }).start();
+    public void updateOnFreeze() {
+        applyFreeze(3000L, 0.0);
     }
 
     @Override

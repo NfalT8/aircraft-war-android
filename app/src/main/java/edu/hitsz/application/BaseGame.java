@@ -6,8 +6,12 @@ import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
-import android.graphics.Rect;
+import android.graphics.RectF;
 import android.graphics.Typeface;
+import android.os.Handler;
+import android.os.HandlerThread;
+import android.os.Process;
+import android.view.Choreographer;
 import android.view.MotionEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
@@ -44,10 +48,10 @@ import java.util.LinkedList;
 import java.util.List;
 
 /**
- * 游戏主循环：SurfaceView + 子线程，40ms 一帧。
- * 按屏幕实际比例自适应逻辑分辨率，等比缩放铺满全屏。
+ * 游戏主循环：固定 25Hz（40ms）逻辑步长 + Choreographer VSync 高帧率（60/90/120Hz）插值渲染，
+ * 配合 GPU 硬件画布与零延迟触屏响应。
  */
-public abstract class BaseGame extends SurfaceView implements SurfaceHolder.Callback, Runnable {
+public abstract class BaseGame extends SurfaceView implements SurfaceHolder.Callback {
 
     public enum BuffType {
         SCATTER,
@@ -67,11 +71,19 @@ public abstract class BaseGame extends SurfaceView implements SurfaceHolder.Call
         void onGameOver(int score);
     }
 
-    private static final int TIME_INTERVAL = 40;
+    private static final long LOGIC_STEP_NANOS = 40_000_000L;
+    private static final long MAX_FRAME_DELTA_NANOS = 200_000_000L;
+    private static final int MAX_LOGIC_STEPS_PER_FRAME = 4;
 
     private final SurfaceHolder surfaceHolder;
-    private Thread gameThread;
+    private HandlerThread gameThread;
+    private Handler gameHandler;
+    private Choreographer gameChoreographer;
     private volatile boolean running = false;
+    private boolean useHardwareCanvas = true;
+
+    private long lastFrameTimeNanos = 0L;
+    private long accumulatorNanos = 0L;
 
     // 逻辑坐标到屏幕坐标的等比缩放系数与安全区偏移
     private volatile float scale = 0f;
@@ -80,7 +92,7 @@ public abstract class BaseGame extends SurfaceView implements SurfaceHolder.Call
     private volatile boolean pendingHeroResetPosition = false;
     private volatile boolean pendingHeroClamp = false;
 
-    private int backGroundTop = 0;
+    private long bgTickCount = 0L;
     protected Bitmap backgroundImage;
     protected GameDifficulty difficulty;
 
@@ -144,7 +156,8 @@ public abstract class BaseGame extends SurfaceView implements SurfaceHolder.Call
     private int lastReportedBossMaxHp = -1;
 
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Rect backgroundDest = new Rect();
+    private final Paint bitmapPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+    private final RectF backgroundDest = new RectF();
 
     protected abstract void initDifficultyParams();
 
@@ -247,8 +260,18 @@ public abstract class BaseGame extends SurfaceView implements SurfaceHolder.Call
             mediaPlayer.resume();
         }
         if (gameThread == null || !gameThread.isAlive()) {
-            gameThread = new Thread(this, "aircraft-game-loop");
+            gameThread = new HandlerThread("aircraft-game-loop", Process.THREAD_PRIORITY_DISPLAY);
             gameThread.start();
+            gameHandler = new Handler(gameThread.getLooper());
+            gameHandler.post(() -> {
+                if (!running) {
+                    return;
+                }
+                lastFrameTimeNanos = 0L;
+                accumulatorNanos = 0L;
+                gameChoreographer = Choreographer.getInstance();
+                gameChoreographer.postFrameCallback(frameCallback);
+            });
         }
     }
 
@@ -286,13 +309,25 @@ public abstract class BaseGame extends SurfaceView implements SurfaceHolder.Call
     public void surfaceDestroyed(SurfaceHolder holder) {
         running = false;
         mediaPlayer.pause();
-        if (gameThread != null) {
+        HandlerThread thread = gameThread;
+        Handler handler = gameHandler;
+        gameThread = null;
+        gameHandler = null;
+        if (handler != null) {
+            handler.post(() -> {
+                if (gameChoreographer != null) {
+                    gameChoreographer.removeFrameCallback(frameCallback);
+                    gameChoreographer = null;
+                }
+            });
+        }
+        if (thread != null) {
+            thread.quitSafely();
             try {
-                gameThread.join();
+                thread.join();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
-            gameThread = null;
         }
     }
 
@@ -300,48 +335,93 @@ public abstract class BaseGame extends SurfaceView implements SurfaceHolder.Call
     //      游戏主循环
     //***********************
 
-    @Override
-    public void run() {
-        while (running) {
-            long frameStart = System.currentTimeMillis();
+    private final Choreographer.FrameCallback frameCallback = new Choreographer.FrameCallback() {
+        @Override
+        public void doFrame(long frameTimeNanos) {
+            if (!running) {
+                return;
+            }
+            if (gameChoreographer != null) {
+                gameChoreographer.postFrameCallback(this);
+            }
 
-            if (scale > 0f) {
-                if (gameOverFlag && restartRequested) {
-                    restartRequested = false;
-                    resetGame();
-                }
-                applyPendingHeroMove();
-                if (!gameOverFlag) {
+            if (lastFrameTimeNanos == 0L) {
+                lastFrameTimeNanos = frameTimeNanos;
+            }
+            long deltaNanos = frameTimeNanos - lastFrameTimeNanos;
+            lastFrameTimeNanos = frameTimeNanos;
+            if (deltaNanos < 0L) {
+                deltaNanos = 0L;
+            } else if (deltaNanos > MAX_FRAME_DELTA_NANOS) {
+                deltaNanos = MAX_FRAME_DELTA_NANOS;
+            }
+
+            if (scale <= 0f) {
+                return;
+            }
+
+            if (gameOverFlag && restartRequested) {
+                restartRequested = false;
+                accumulatorNanos = 0L;
+                resetGame();
+            }
+
+            // 英雄机位置每渲染帧立即应用，保证 60/120Hz 零延迟跟手
+            applyPendingHeroMove();
+
+            if (!gameOverFlag) {
+                accumulatorNanos += deltaNanos;
+                int steps = 0;
+                while (accumulatorNanos >= LOGIC_STEP_NANOS && steps < MAX_LOGIC_STEPS_PER_FRAME) {
                     action();
+                    accumulatorNanos -= LOGIC_STEP_NANOS;
+                    steps++;
+                    if (gameOverFlag) {
+                        accumulatorNanos = 0L;
+                        break;
+                    }
                 }
-
-                Canvas canvas = null;
-                try {
-                    canvas = surfaceHolder.lockCanvas();
-                    if (canvas != null) {
-                        drawFrame(canvas);
-                    }
-                } catch (Exception e) {
-                    e.printStackTrace();
-                } finally {
-                    if (canvas != null) {
-                        surfaceHolder.unlockCanvasAndPost(canvas);
-                    }
+                if (accumulatorNanos >= LOGIC_STEP_NANOS) {
+                    accumulatorNanos %= LOGIC_STEP_NANOS;
                 }
             }
 
-            long elapsed = System.currentTimeMillis() - frameStart;
-            if (elapsed < TIME_INTERVAL) {
-                try {
-                    Thread.sleep(TIME_INTERVAL - elapsed);
-                } catch (InterruptedException e) {
-                    break;
+            float alpha = gameOverFlag
+                    ? 1f
+                    : Math.max(0f, Math.min(1f, accumulatorNanos / (float) LOGIC_STEP_NANOS));
+
+            Canvas canvas = null;
+            try {
+                canvas = lockCanvasCompat();
+                if (canvas != null) {
+                    drawFrame(canvas, alpha);
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            } finally {
+                if (canvas != null) {
+                    surfaceHolder.unlockCanvasAndPost(canvas);
                 }
             }
         }
+    };
+
+    private Canvas lockCanvasCompat() {
+        if (!surfaceHolder.getSurface().isValid()) {
+            return null;
+        }
+        if (useHardwareCanvas) {
+            try {
+                return surfaceHolder.lockHardwareCanvas();
+            } catch (IllegalStateException | UnsupportedOperationException e) {
+                useHardwareCanvas = false;
+            }
+        }
+        return surfaceHolder.lockCanvas();
     }
 
     private void action() {
+        bgTickCount++;
         processUltimateRequests();
         increaseDifficultyWithTime();
 
@@ -739,7 +819,7 @@ public abstract class BaseGame extends SurfaceView implements SurfaceHolder.Call
 
     private void resetGame() {
         score = 0;
-        backGroundTop = 0;
+        bgTickCount = 0L;
         enemySpawnCounter = 0;
         shootCounter = 0;
         enemyShootCounter = 0;
@@ -783,7 +863,7 @@ public abstract class BaseGame extends SurfaceView implements SurfaceHolder.Call
     //      Canvas 绘制
     //***********************
 
-    private void drawFrame(Canvas canvas) {
+    private void drawFrame(Canvas canvas, float alpha) {
         if (scale <= 0f) {
             return;
         }
@@ -792,21 +872,21 @@ public abstract class BaseGame extends SurfaceView implements SurfaceHolder.Call
         int saveCount = canvas.save();
         canvas.scale(scale, scale);
 
-        // 绘制背景,图片滚动
-        drawBackground(canvas);
+        // 绘制背景（按固定步长插值平滑滚动）
+        drawBackground(canvas, alpha);
 
-        // 先绘制子弹，后绘制飞机
-        paintImageWithPositionRevised(canvas, enemyBullets);
-        paintImageWithPositionRevised(canvas, heroBullets);
-        paintImageWithPositionRevised(canvas, enemyAircrafts);
-        paintImageWithPositionRevised(canvas, props);
+        // 先绘制子弹，后绘制飞机与道具（高帧率位置插值）
+        paintImageWithPositionRevised(canvas, enemyBullets, alpha);
+        paintImageWithPositionRevised(canvas, heroBullets, alpha);
+        paintImageWithPositionRevised(canvas, enemyAircrafts, alpha);
+        paintImageWithPositionRevised(canvas, props, alpha);
 
         Bitmap heroImage = ImageManager.HERO_IMAGE;
         if (heroImage != null) {
             canvas.drawBitmap(heroImage,
                     heroAircraft.getLocationX() - heroImage.getWidth() / 2f,
                     heroAircraft.getLocationY() - heroImage.getHeight() / 2f,
-                    null);
+                    bitmapPaint);
         }
 
         //绘制得分和生命值
@@ -815,7 +895,7 @@ public abstract class BaseGame extends SurfaceView implements SurfaceHolder.Call
         canvas.restoreToCount(saveCount);
     }
 
-    private void drawBackground(Canvas canvas) {
+    private void drawBackground(Canvas canvas, float alpha) {
         if (backgroundImage == null) {
             return;
         }
@@ -824,40 +904,33 @@ public abstract class BaseGame extends SurfaceView implements SurfaceHolder.Call
         if (imgWidth <= 0 || imgHeight <= 0) {
             return;
         }
-        int tileWidth = GameConfig.WINDOW_WIDTH;
-        int tileHeight = Math.max(1, Math.round(tileWidth * (imgHeight / (float) imgWidth)));
+        float tileWidth = GameConfig.WINDOW_WIDTH;
+        float tileHeight = Math.max(1f, tileWidth * (imgHeight / (float) imgWidth));
 
-        if (backGroundTop >= tileHeight) {
-            backGroundTop %= tileHeight;
-        }
+        float logicalScroll = gameOverFlag ? (float) bgTickCount : (bgTickCount + alpha);
+        float scrollOffset = logicalScroll % tileHeight;
 
-        for (int y = backGroundTop - tileHeight; y < GameConfig.WINDOW_HEIGHT; y += tileHeight) {
-            if (y + tileHeight <= 0) {
+        for (float y = scrollOffset - tileHeight; y < GameConfig.WINDOW_HEIGHT; y += tileHeight) {
+            if (y + tileHeight <= 0f) {
                 continue;
             }
-            backgroundDest.set(0, y, tileWidth, y + tileHeight);
-            canvas.drawBitmap(backgroundImage, null, backgroundDest, null);
-        }
-
-        if (!gameOverFlag) {
-            backGroundTop++;
-            if (backGroundTop >= tileHeight) {
-                backGroundTop = 0;
-            }
+            backgroundDest.set(0f, y, tileWidth, y + tileHeight + 0.5f);
+            canvas.drawBitmap(backgroundImage, null, backgroundDest, bitmapPaint);
         }
     }
 
     private void paintImageWithPositionRevised(Canvas canvas,
-                                               List<? extends AbstractFlyingObject> objects) {
+                                               List<? extends AbstractFlyingObject> objects,
+                                               float alpha) {
         for (AbstractFlyingObject object : objects) {
             Bitmap image = object.getImage();
             if (image == null) {
                 continue;
             }
             canvas.drawBitmap(image,
-                    object.getLocationX() - image.getWidth() / 2f,
-                    object.getLocationY() - image.getHeight() / 2f,
-                    null);
+                    object.getInterpolatedX(alpha) - image.getWidth() / 2f,
+                    object.getInterpolatedY(alpha) - image.getHeight() / 2f,
+                    bitmapPaint);
         }
     }
 
@@ -944,14 +1017,10 @@ public abstract class BaseGame extends SurfaceView implements SurfaceHolder.Call
         if (scale <= 0f) {
             return;
         }
-        float x = screenX / scale;
-        float y = screenY / scale;
-        if (x < 0 || x > GameConfig.WINDOW_WIDTH || y < 0 || y > GameConfig.WINDOW_HEIGHT) {
-            // 防止超出边界
-            return;
-        }
-        pendingHeroX = (int) x;
-        pendingHeroY = (int) y;
+        float x = Math.max(0f, Math.min(GameConfig.WINDOW_WIDTH, screenX / scale));
+        float y = Math.max(0f, Math.min(GameConfig.WINDOW_HEIGHT, screenY / scale));
+        pendingHeroX = Math.round(x);
+        pendingHeroY = Math.round(y);
         heroMovePending = true;
     }
 

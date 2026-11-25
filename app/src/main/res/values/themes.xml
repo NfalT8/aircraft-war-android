@@ -6,4 +6,12 @@
     </style>
 
     <style name="Theme.AircraftWar10" parent="Base.Theme.AircraftWar10" />
+
+    <style name="ThemeOverlay.AircraftWar.DarkDialog" parent="Theme.Material3.Dark.Dialog.Alert">
+        <item name="colorPrimary">#4DD0E1</item>
+        <item name="colorSurface">#101B2E</item>
+        <item name="colorOnSurface">#FFFFFF</item>
+        <item name="colorOnSurfaceVariant">#B8C7DE</item>
+        <item name="android:windowBackground">@drawable/bg_panel</item>
+    </style>
 </resources>

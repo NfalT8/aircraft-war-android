@@ -1,11 +1,17 @@
 package edu.hitsz;
 
+import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.Bundle;
+import android.text.TextUtils;
 import android.view.View;
 import android.view.WindowManager;
+import android.view.inputmethod.InputMethodManager;
+import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageButton;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.view.ViewCompat;
@@ -15,12 +21,19 @@ import androidx.core.view.WindowInsetsControllerCompat;
 
 import com.google.android.material.button.MaterialButton;
 
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
+
 import edu.hitsz.application.BaseGame;
 import edu.hitsz.application.EasyGame;
 import edu.hitsz.application.GameDifficulty;
 import edu.hitsz.application.HardGame;
 import edu.hitsz.application.ImageManager;
 import edu.hitsz.application.NormalGame;
+import edu.hitsz.dao.RankDao;
+import edu.hitsz.dao.RankDaoFactory;
+import edu.hitsz.dao.RankRecord;
 import edu.hitsz.ui.BossHealthBarView;
 import edu.hitsz.ui.BuffCountdownView;
 
@@ -30,17 +43,26 @@ import edu.hitsz.ui.BuffCountdownView;
 public class GameActivity extends AppCompatActivity {
 
     public static final String EXTRA_DIFFICULTY = "extra_difficulty";
+    private static final String PREFS_PLAYER = "aircraft_player_prefs";
+    private static final String KEY_LAST_PLAYER_NAME = "last_player_name";
+    private static final String DEFAULT_PLAYER_NAME = "匿名飞行员";
 
     private BaseGame game;
+    private GameDifficulty currentDifficulty;
+    private RankDao rankDao;
     private ImageButton btnBomb;
     private ImageButton btnHeal;
     private ImageButton btnRing;
     private View skillContainer;
     private View gameOverOverlay;
+    private EditText etPlayerName;
+    private MaterialButton btnSaveAndRank;
     private BuffCountdownView buffCountdownView;
     private BossHealthBarView bossHealthBar;
 
     private boolean musicEnabled = true;
+    private int lastFinalScore = 0;
+    private boolean scoreSavedForRound = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -49,8 +71,10 @@ public class GameActivity extends AppCompatActivity {
         enterImmersiveMode();
 
         setContentView(R.layout.activity_game);
+        rankDao = RankDaoFactory.create(this);
+        currentDifficulty = readDifficulty();
         FrameLayout gameContainer = findViewById(R.id.gameContainer);
-        game = createGame(readDifficulty());
+        game = createGame(currentDifficulty);
         gameContainer.addView(game, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT));
@@ -86,8 +110,11 @@ public class GameActivity extends AppCompatActivity {
 
             @Override
             public void onGameOver(int score) {
+                lastFinalScore = score;
+                scoreSavedForRound = false;
                 TextView finalScore = findViewById(R.id.tvFinalScore);
-                finalScore.setText("得分 " + score);
+                finalScore.setText(currentDifficulty.getDisplayName() + " · 得分 " + score);
+                btnSaveAndRank.setText("保存并查看排行榜");
                 buffCountdownView.clearBuffs();
                 bossHealthBar.hideImmediately();
                 skillContainer.setVisibility(View.GONE);
@@ -149,17 +176,57 @@ public class GameActivity extends AppCompatActivity {
     private void setupGameOverOverlay() {
         skillContainer = findViewById(R.id.skillContainer);
         gameOverOverlay = findViewById(R.id.gameOverOverlay);
+        etPlayerName = findViewById(R.id.etPlayerName);
+        btnSaveAndRank = findViewById(R.id.btnSaveAndRank);
+
+        SharedPreferences prefs = getSharedPreferences(PREFS_PLAYER, MODE_PRIVATE);
+        String savedName = prefs.getString(KEY_LAST_PLAYER_NAME, "");
+        if (!TextUtils.isEmpty(savedName)) {
+            etPlayerName.setText(savedName);
+        }
 
         MaterialButton btnRestart = findViewById(R.id.btnRestart);
         MaterialButton btnBackToMenu = findViewById(R.id.btnBackToMenu);
 
+        btnSaveAndRank.setOnClickListener(v -> {
+            hideKeyboard();
+            if (!scoreSavedForRound) {
+                String inputName = etPlayerName.getText().toString().trim();
+                String finalName = TextUtils.isEmpty(inputName) ? DEFAULT_PLAYER_NAME : inputName;
+                if (!TextUtils.isEmpty(inputName)) {
+                    prefs.edit().putString(KEY_LAST_PLAYER_NAME, inputName).apply();
+                }
+                String now = new SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
+                        .format(new Date());
+                rankDao.insert(new RankRecord(finalName, lastFinalScore, now, currentDifficulty));
+                scoreSavedForRound = true;
+                btnSaveAndRank.setText("已保存 · 查看排行榜");
+                Toast.makeText(this, "成绩已保存到排行榜", Toast.LENGTH_SHORT).show();
+            }
+            Intent intent = new Intent(this, RankActivity.class);
+            intent.putExtra(RankActivity.EXTRA_DIFFICULTY, currentDifficulty.name());
+            startActivity(intent);
+        });
+
         btnRestart.setOnClickListener(v -> {
+            hideKeyboard();
+            scoreSavedForRound = false;
             gameOverOverlay.setVisibility(View.GONE);
             skillContainer.setVisibility(View.VISIBLE);
             setSkillButtonsEnabled(false);
             game.restartGame();
         });
-        btnBackToMenu.setOnClickListener(v -> finish());
+        btnBackToMenu.setOnClickListener(v -> {
+            hideKeyboard();
+            finish();
+        });
+    }
+
+    private void hideKeyboard() {
+        InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+        if (imm != null && etPlayerName != null) {
+            imm.hideSoftInputFromWindow(etPlayerName.getWindowToken(), 0);
+        }
     }
 
     private void setSkillButtonsEnabled(boolean enabled) {

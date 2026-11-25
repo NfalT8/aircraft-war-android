@@ -109,6 +109,29 @@
             app:backgroundTint="#F05252"
             app:cornerRadius="28dp" />
 
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="20dp"
+            android:background="#26FFFFFF" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnRank"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:layout_marginTop="16dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:text="排 行 榜"
+            android:textAllCaps="false"
+            android:textColor="#4DD0E1"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            app:backgroundTint="#192840"
+            app:cornerRadius="26dp"
+            app:strokeColor="#664DD0E1"
+            app:strokeWidth="1dp" />
+
     </LinearLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>

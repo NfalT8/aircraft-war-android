@@ -16,8 +16,7 @@ public class MobEnemy extends AbstractAircraft implements GameObserver {
 
     @Override
     public void updateOnFreeze() {
-        this.speedX = 0;
-        this.speedY = 0;
+        applyFreeze(5000L, 0.0);
     }
 
     @Override

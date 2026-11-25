@@ -30,6 +30,7 @@ public class MainActivity extends AppCompatActivity {
         findViewById(R.id.btnEasy).setOnClickListener(v -> openGame(GameDifficulty.EASY));
         findViewById(R.id.btnNormal).setOnClickListener(v -> openGame(GameDifficulty.NORMAL));
         findViewById(R.id.btnHard).setOnClickListener(v -> openGame(GameDifficulty.HARD));
+        findViewById(R.id.btnRank).setOnClickListener(v -> openRank());
 
         View menuCard = findViewById(R.id.menuCard);
         menuCard.setAlpha(0f);
@@ -45,6 +46,11 @@ public class MainActivity extends AppCompatActivity {
     private void openGame(GameDifficulty difficulty) {
         Intent intent = new Intent(this, GameActivity.class);
         intent.putExtra(GameActivity.EXTRA_DIFFICULTY, difficulty.name());
+        startActivity(intent);
+    }
+
+    private void openRank() {
+        Intent intent = new Intent(this, RankActivity.class);
         startActivity(intent);
     }
 }
