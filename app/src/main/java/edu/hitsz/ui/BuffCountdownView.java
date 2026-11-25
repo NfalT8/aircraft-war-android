@@ -96,13 +96,13 @@ public class BuffCountdownView extends View {
     }
 
     /**
-     * 启动或刷新指定 Buff 的倒计时。武器类 Buff（散射/环射）共用同一槽位，冰冻独立成槽。
+     * 启动或刷新指定 Buff 的倒计时。超载、环射与冰冻各自独立成槽，可同时展示。
      */
     public void startBuff(@NonNull BuffType type, long durationMs) {
         if (durationMs <= 0) {
             return;
         }
-        int slotKey = (type == BuffType.FREEZE) ? 1 : 0;
+        int slotKey = type.ordinal();
         int accentColor = resolveColor(type);
         Drawable icon = resolveIcon(type, accentColor);
         long now = SystemClock.elapsedRealtime();

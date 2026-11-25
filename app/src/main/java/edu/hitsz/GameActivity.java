@@ -282,8 +282,25 @@ public class GameActivity extends AppCompatActivity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        if (game != null) {
+            game.onResume();
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        if (game != null) {
+            game.onPause();
+        }
+        super.onPause();
+    }
+
+    @Override
     protected void onDestroy() {
         if (game != null) {
+            game.onPause();
             game.releaseAudio();
         }
         super.onDestroy();

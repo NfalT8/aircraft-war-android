@@ -25,7 +25,7 @@ public class HardGame extends BaseGame {
         this.bossScore = 400;
 
         this.enemySpawnCycle = 25;
-        this.shootCycle = 20;
+        this.shootCycle = 6;
         this.enemyShootCycle = 35;
     }
 
@@ -41,8 +41,6 @@ public class HardGame extends BaseGame {
             this.enemySpawnCycle = Math.max(10, this.enemySpawnCycle - 1);
 
             this.enemyShootCycle = Math.max(15, this.enemyShootCycle - 2);
-
-            this.shootCycle = Math.min(30, this.shootCycle + 1);
 
             this.probElite = Math.min(0.9, this.probElite + 0.02);
             this.probElitePlus = Math.min(0.9, this.probElitePlus + 0.02);

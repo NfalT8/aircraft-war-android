@@ -11,7 +11,7 @@ import java.util.List;
 public interface ShootStrategy {
     List<BaseBullet> shoot(AbstractAircraft aircraft);
     default BaseBullet createBullet(AbstractAircraft aircraft, int x, int y, int speedX, int speedY, int power){
-        int actualPower = aircraft.getPower();
+        int actualPower = power > 0 ? power : aircraft.getPower();
         if(aircraft instanceof HeroAircraft){
             return new HeroBullet(x,y,speedX,speedY,actualPower);
         }

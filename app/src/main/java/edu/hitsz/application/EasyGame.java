@@ -11,7 +11,7 @@ public class EasyGame extends BaseGame {
     @Override
     protected void initDifficultyParams() {
         this.difficulty = GameDifficulty.EASY;
-        this.shootCycle = 25;
+        this.shootCycle = 5;
         this.enemyMaxNumber = 5;
         this.bossScore = Integer.MAX_VALUE;
         this.enemySpawnCycle = 35;

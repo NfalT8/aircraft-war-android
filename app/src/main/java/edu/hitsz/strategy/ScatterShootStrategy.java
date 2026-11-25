@@ -12,17 +12,21 @@ public class ScatterShootStrategy implements ShootStrategy{
     @Override
     public List<BaseBullet> shoot(AbstractAircraft aircraft) {
         List<BaseBullet> res = new LinkedList<>();
+        boolean isHero = aircraft instanceof HeroAircraft;
         int cpower = aircraft.getPower();
-        int ScatterPower = (int) (cpower * 0.7);
-        int direction = aircraft instanceof HeroAircraft? -1:1;
+        int scatterPower = Math.max(1, Math.round(cpower * 0.75f));
+        int direction = isHero ? -1 : 1;
         int x = aircraft.getLocationX();
-        int y = aircraft.getLocationY() + direction * 2;
+        int y = isHero
+                ? aircraft.getLocationY() - aircraft.getHeight() / 2 + 8
+                : aircraft.getLocationY() + direction * 2;
 
-        int speedY = aircraft.getSpeedY() + direction * 5;
+        int speedY = isHero ? -20 : aircraft.getSpeedY() + direction * 5;
+        int spreadX = isHero ? 4 : 2;
 
-        res.add(createBullet(aircraft, x, y, -2, speedY, ScatterPower));
-        res.add(createBullet(aircraft, x, y, 0, speedY, ScatterPower));
-        res.add(createBullet(aircraft, x, y, 2, speedY, ScatterPower));
+        res.add(createBullet(aircraft, x - (isHero ? 8 : 0), y, -spreadX, speedY, scatterPower));
+        res.add(createBullet(aircraft, x, y, 0, speedY, scatterPower));
+        res.add(createBullet(aircraft, x + (isHero ? 8 : 0), y, spreadX, speedY, scatterPower));
 
         return res;
     }

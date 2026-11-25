@@ -12,13 +12,15 @@ public class DirectShootStrategy implements ShootStrategy{
     @Override
     public List<BaseBullet> shoot(AbstractAircraft aircraft){
         List<BaseBullet> res = new LinkedList<>();
-        int direction = (aircraft instanceof HeroAircraft? -1 : 1);
+        boolean isHero = aircraft instanceof HeroAircraft;
+        int direction = isHero ? -1 : 1;
         int x = aircraft.getLocationX();
-        int y = aircraft.getLocationY() + direction*2;
+        int y = isHero
+                ? aircraft.getLocationY() - aircraft.getHeight() / 2 + 6
+                : aircraft.getLocationY() + direction * 2;
         int speedX = 0;
-        int speedY = aircraft.getSpeedY() + direction*5;
+        int speedY = isHero ? -20 : aircraft.getSpeedY() + direction * 5;
         int cpower = aircraft.getPower();
-        BaseBullet bullet;
 
         res.add(createBullet(aircraft, x, y, speedX, speedY, cpower));
         return res;
