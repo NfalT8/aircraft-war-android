@@ -1,6 +1,5 @@
 package edu.hitsz.strategy;
 
-import java.util.LinkedList;
 import java.util.List;
 
 import edu.hitsz.aircraft.AbstractAircraft;
@@ -18,8 +17,7 @@ import edu.hitsz.bullet.BaseBullet;
 public class TieredHeroShootStrategy implements ShootStrategy {
 
     @Override
-    public List<BaseBullet> shoot(AbstractAircraft aircraft) {
-        List<BaseBullet> res = new LinkedList<>();
+    public void shootInto(AbstractAircraft aircraft, List<BaseBullet> out) {
         int level = (aircraft instanceof HeroAircraft)
                 ? ((HeroAircraft) aircraft).getFirepowerLevel()
                 : HeroAircraft.MIN_FIREPOWER_LEVEL;
@@ -31,44 +29,43 @@ public class TieredHeroShootStrategy implements ShootStrategy {
         switch (level) {
             case 2: {
                 int p = Math.max(1, Math.round(basePower * 0.75f));
-                res.add(createBullet(aircraft, x - 12, noseY + 4, 0, -20, p));
-                res.add(createBullet(aircraft, x + 12, noseY + 4, 0, -20, p));
+                out.add(createBullet(aircraft, x - 12, noseY + 4, 0, -20, p));
+                out.add(createBullet(aircraft, x + 12, noseY + 4, 0, -20, p));
                 break;
             }
             case 3: {
                 int centerP = Math.max(1, Math.round(basePower * 0.80f));
                 int sideP = Math.max(1, Math.round(basePower * 0.55f));
-                res.add(createBullet(aircraft, x, noseY, 0, -20, centerP));
-                res.add(createBullet(aircraft, x - 14, noseY + 6, -3, -20, sideP));
-                res.add(createBullet(aircraft, x + 14, noseY + 6, 3, -20, sideP));
+                out.add(createBullet(aircraft, x, noseY, 0, -20, centerP));
+                out.add(createBullet(aircraft, x - 14, noseY + 6, -3, -20, sideP));
+                out.add(createBullet(aircraft, x + 14, noseY + 6, 3, -20, sideP));
                 break;
             }
             case 4: {
                 int innerP = Math.max(1, Math.round(basePower * 0.65f));
                 int outerP = Math.max(1, Math.round(basePower * 0.50f));
-                res.add(createBullet(aircraft, x - 10, noseY + 2, 0, -20, innerP));
-                res.add(createBullet(aircraft, x + 10, noseY + 2, 0, -20, innerP));
-                res.add(createBullet(aircraft, x - 20, noseY + 10, -4, -19, outerP));
-                res.add(createBullet(aircraft, x + 20, noseY + 10, 4, -19, outerP));
+                out.add(createBullet(aircraft, x - 10, noseY + 2, 0, -20, innerP));
+                out.add(createBullet(aircraft, x + 10, noseY + 2, 0, -20, innerP));
+                out.add(createBullet(aircraft, x - 20, noseY + 10, -4, -19, outerP));
+                out.add(createBullet(aircraft, x + 20, noseY + 10, 4, -19, outerP));
                 break;
             }
             case 5: {
                 int centerP = Math.max(1, Math.round(basePower * 0.70f));
                 int innerP = Math.max(1, Math.round(basePower * 0.55f));
                 int outerP = Math.max(1, Math.round(basePower * 0.50f));
-                res.add(createBullet(aircraft, x, noseY, 0, -21, centerP));
-                res.add(createBullet(aircraft, x - 12, noseY + 4, -1, -21, innerP));
-                res.add(createBullet(aircraft, x + 12, noseY + 4, 1, -21, innerP));
-                res.add(createBullet(aircraft, x - 22, noseY + 10, -4, -20, outerP));
-                res.add(createBullet(aircraft, x + 22, noseY + 10, 4, -20, outerP));
+                out.add(createBullet(aircraft, x, noseY, 0, -21, centerP));
+                out.add(createBullet(aircraft, x - 12, noseY + 4, -1, -21, innerP));
+                out.add(createBullet(aircraft, x + 12, noseY + 4, 1, -21, innerP));
+                out.add(createBullet(aircraft, x - 22, noseY + 10, -4, -20, outerP));
+                out.add(createBullet(aircraft, x + 22, noseY + 10, 4, -20, outerP));
                 break;
             }
             case 1:
             default: {
-                res.add(createBullet(aircraft, x, noseY, 0, -20, basePower));
+                out.add(createBullet(aircraft, x, noseY, 0, -20, basePower));
                 break;
             }
         }
-        return res;
     }
 }

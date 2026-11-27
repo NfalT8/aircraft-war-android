@@ -44,7 +44,7 @@ import edu.hitsz.prop.FreezeProp;
 import edu.hitsz.ui.GameEffects;
 import edu.hitsz.ui.GameHaptics;
 
-import java.util.LinkedList;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -78,6 +78,17 @@ public abstract class BaseGame extends View {
     private static final long OVERDRIVE_DURATION_MS = 5000L;
     private static final int OVERDRIVE_BONUS_SCORE = 100;
     private static final int OVERDRIVE_BONUS_ENERGY = 15;
+    private static final double RING_SHOOT_CYCLE = 10.0;
+    private static final int MAX_HERO_BULLETS = 160;
+
+    private static final String[] ELITE_PLUS_PROP_POOL =
+            {"Blood", "Bullet", "BulletPlus", "Bomb"};
+    private static final String[] ELITE_PRO_PROP_POOL =
+            {"Blood", "Bullet", "BulletPlus", "Freeze", "Bomb"};
+    private static final String[] ELITE_PROP_POOL =
+            {"Blood", "Bullet", "BulletPlus"};
+    private static final String[] BOSS_PROP_POOL =
+            {"Blood", "Bullet", "BulletPlus", "Freeze", "Bomb"};
 
     private boolean attached = false;
     private boolean resumed = false;
@@ -88,8 +99,9 @@ public abstract class BaseGame extends View {
     private float renderAlpha = 1f;
 
     // 逻辑坐标到屏幕坐标的等比缩放系数与安全区偏移
-    private float scale = 0f;
-    private int topSafeInsetPx = 0;
+    private volatile float scale = 0f;
+    private volatile int topSafeInsetPx = 0;
+    private final float hudTopMarginPx;
     private boolean heroPositionedForSurface = false;
     private boolean pendingHeroResetPosition = false;
     private boolean pendingHeroClamp = false;
@@ -111,7 +123,7 @@ public abstract class BaseGame extends View {
     protected final List<AbstractAircraft> enemyAircrafts;
     protected final List<BaseBullet> heroBullets;
     protected final List<BaseBullet> enemyBullets;
-    protected final List<AbstractProp> props = new LinkedList<>();
+    protected final List<AbstractProp> props = new ArrayList<>(16);
 
     //屏幕中出现的敌机最大数量
     protected int enemyMaxNumber = 5;
@@ -159,17 +171,32 @@ public abstract class BaseGame extends View {
     private final MySoundPool soundPool;
     private final GameEffects effects = new GameEffects();
     private final GameHaptics haptics;
-    private boolean musicEnabled = true;
+    private volatile boolean musicEnabled = true;
 
     //技能请求由 UI 线程写入，游戏线程消费
     private volatile boolean bombUltimateRequested = false;
     private volatile boolean healUltimateRequested = false;
     private volatile boolean ringUltimateRequested = false;
 
-    private UiListener uiListener;
+    private volatile UiListener uiListener;
     private boolean lastEnergyFull = false;
     private int lastReportedBossHp = -1;
     private int lastReportedBossMaxHp = -1;
+
+    private int loadedBackgroundResId = 0;
+
+    // HUD 文本缓存，避免高帧率下每帧拼接字符串
+    private int hudScoreCache = Integer.MIN_VALUE;
+    private int hudHpCache = Integer.MIN_VALUE;
+    private int hudEnergyCache = Integer.MIN_VALUE;
+    private int hudTierCache = Integer.MIN_VALUE;
+    private boolean hudEnergyFullCache = false;
+    private boolean hudOverdriveCache = false;
+    private String hudScoreText = "";
+    private String hudModeName = "";
+    private String hudInfoText = "";
+    private String hudEnergyText = "";
+    private String hudTierText = "";
 
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint bitmapPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
@@ -199,6 +226,7 @@ public abstract class BaseGame extends View {
     public BaseGame(Context context) {
         super(context);
         setFocusable(true);
+        hudTopMarginPx = 30f * getResources().getDisplayMetrics().density;
 
         Context appContext = context.getApplicationContext();
         mediaPlayer = new MyMediaPlayer(appContext);
@@ -215,15 +243,16 @@ public abstract class BaseGame extends View {
                 new PorterDuffColorFilter(0x66FFB300, PorterDuff.Mode.SRC_ATOP));
 
         heroAircraft = HeroAircraft.getInstance();
-        enemyAircrafts = new LinkedList<>();
-        heroBullets = new LinkedList<>();
-        enemyBullets = new LinkedList<>();
+        enemyAircrafts = new ArrayList<>(16);
+        heroBullets = new ArrayList<>(256);
+        enemyBullets = new ArrayList<>(128);
 
         // 重置难度倍率
         AbstractAircraft.setHpMultiplier(1.0);
         AbstractAircraft.setSpeedMultiplier(1.0);
         initDifficultyParams();
         loadBackground();
+        hudModeName = difficulty != null ? difficulty.getDisplayName() : "";
         heroAircraft.reset();
     }
 
@@ -231,10 +260,21 @@ public abstract class BaseGame extends View {
         if (difficulty == null) {
             return;
         }
+        int resId = difficulty.getBackgroundId();
+        if (backgroundImage != null && resId == loadedBackgroundResId) {
+            return;
+        }
         BitmapFactory.Options options = new BitmapFactory.Options();
         options.inScaled = false;
-        backgroundImage = BitmapFactory.decodeResource(
-                getResources(), difficulty.getBackgroundId(), options);
+        Bitmap loaded = BitmapFactory.decodeResource(getResources(), resId, options);
+        if (loaded != null) {
+            Bitmap previous = backgroundImage;
+            backgroundImage = loaded;
+            loadedBackgroundResId = resId;
+            if (previous != null) {
+                previous.recycle();
+            }
+        }
     }
 
     public void setMusicEnabled(boolean enabled) {
@@ -552,22 +592,27 @@ public abstract class BaseGame extends View {
         } else if (heroAircraft.isMaxFirepower()) {
             effectiveCycle = Math.max(3.5, shootCycle * 0.88);
         }
+        if (heroAircraft.isRingActive()) {
+            effectiveCycle = Math.max(effectiveCycle, RING_SHOOT_CYCLE);
+        }
 
         shootCounter += 1.0;
         if (shootCounter >= effectiveCycle) {
             shootCounter -= effectiveCycle;
-            //英雄机射击
-            List<BaseBullet> fired = heroAircraft.shoot();
-            if (!fired.isEmpty()) {
-                heroBullets.addAll(fired);
-                muzzleFlashAlpha = 1f;
+            //英雄机射击，限制同屏子弹上限，避免环射覆盖时对象数量失控
+            if (heroBullets.size() < MAX_HERO_BULLETS) {
+                int before = heroBullets.size();
+                heroAircraft.shootInto(heroBullets);
+                if (heroBullets.size() > before) {
+                    muzzleFlashAlpha = 1f;
+                }
             }
         }
         enemyShootCounter++;
         if (enemyShootCounter >= enemyShootCycle) {
             enemyShootCounter = 0;
             for (AbstractAircraft enemy : enemyAircrafts) {
-                enemyBullets.addAll(enemy.shoot());
+                enemy.shootInto(enemyBullets);
             }
         }
     }
@@ -594,16 +639,12 @@ public abstract class BaseGame extends View {
     }
 
     private void dropProp(AbstractAircraft enemy) {
-        String[] elitePlusPool = {"Blood", "Bullet", "BulletPlus", "Bomb"};
-        String[] eliteProPool = {"Blood", "Bullet", "BulletPlus", "Freeze", "Bomb"};
-        String[] elitePool = {"Blood", "Bullet", "BulletPlus"};
-        String[] bossPool = {"Blood", "Bullet", "BulletPlus", "Freeze", "Bomb"};
         double dropChance = 0;
         String[] currentPool = null;
         if (enemy instanceof BossEnemy) {
             for (int i = 0; i < 3; i++) {
-                int randomIndex = (int) (Math.random() * bossPool.length);
-                String selectedType = bossPool[randomIndex];
+                int randomIndex = (int) (Math.random() * BOSS_PROP_POOL.length);
+                String selectedType = BOSS_PROP_POOL[randomIndex];
 
                 int offsetX = (i - 1) * 30;
                 AbstractProp prop = PropFactory.createProp(
@@ -616,16 +657,16 @@ public abstract class BaseGame extends View {
         }
         if (enemy instanceof EliteProEnemy) {
             dropChance = 0.8;
-            currentPool = eliteProPool;
+            currentPool = ELITE_PRO_PROP_POOL;
         } else if (enemy instanceof ElitePlusEnemy) {
             dropChance = 0.6;
-            currentPool = elitePlusPool;
+            currentPool = ELITE_PLUS_PROP_POOL;
         } else if (enemy instanceof EliteEnemy) {
             dropChance = 0.5;
-            currentPool = elitePool;
+            currentPool = ELITE_PROP_POOL;
         }
 
-        if (currentPool != null && currentPool != bossPool && Math.random() < dropChance) {
+        if (currentPool != null && Math.random() < dropChance) {
             int randomIndex = (int) (Math.random() * currentPool.length);
             String selectedType = currentPool[randomIndex];
 
@@ -656,7 +697,10 @@ public abstract class BaseGame extends View {
                 effects.triggerHeroDamage();
                 haptics.vibrateMedium();
                 bullet.vanish();
-                if (heroAircraft.getHp() > 0 && heroAircraft.downgradeFirepowerOnHit()) {
+                if (heroAircraft.getHp() <= 0) {
+                    break;
+                }
+                if (heroAircraft.downgradeFirepowerOnHit()) {
                     effects.spawnFloatingText(
                             heroAircraft.getLocationX(),
                             heroAircraft.getLocationY() - 44f,
@@ -672,6 +716,10 @@ public abstract class BaseGame extends View {
                 continue;
             }
             for (AbstractAircraft enemyAircraft : enemyAircrafts) {
+                if (bullet.notValid()) {
+                    // 子弹已命中并消失，不再结算后续敌机
+                    break;
+                }
                 if (enemyAircraft.notValid()) {
                     // 已被其他子弹击毁的敌机，不再检测
                     continue;
@@ -718,15 +766,24 @@ public abstract class BaseGame extends View {
                     } else {
                         enemyAircraft.triggerHitFlash(65L);
                     }
+                    break;
                 }
+            }
+        }
 
-                // 英雄机 与 敌机 相撞，均损毁
+        // 英雄机与敌机相撞，单独检测一次，避免依赖子弹循环
+        if (heroAircraft.getHp() > 0) {
+            for (AbstractAircraft enemyAircraft : enemyAircrafts) {
+                if (enemyAircraft.notValid()) {
+                    continue;
+                }
                 if (enemyAircraft.crash(heroAircraft) || heroAircraft.crash(enemyAircraft)) {
                     effects.spawnExplosion(enemyAircraft.getLocationX(),
                             enemyAircraft.getLocationY(), GameEffects.EXPLOSION_ELITE);
                     effects.triggerHeroDamage();
                     enemyAircraft.vanish();
                     heroAircraft.decreaseHp(Integer.MAX_VALUE);
+                    break;
                 }
             }
         }
@@ -988,6 +1045,12 @@ public abstract class BaseGame extends View {
         lastEnergyFull = false;
         lastReportedBossHp = -1;
         lastReportedBossMaxHp = -1;
+        hudScoreCache = Integer.MIN_VALUE;
+        hudHpCache = Integer.MIN_VALUE;
+        hudEnergyCache = Integer.MIN_VALUE;
+        hudTierCache = Integer.MIN_VALUE;
+        hudEnergyFullCache = false;
+        hudOverdriveCache = false;
         UiListener listener = uiListener;
         if (listener != null) {
             post(() -> {
@@ -1270,10 +1333,38 @@ public abstract class BaseGame extends View {
         fxPaint.setStyle(Paint.Style.FILL);
     }
 
+    private void updateHudTextCaches() {
+        if (score != hudScoreCache) {
+            hudScoreCache = score;
+            hudScoreText = "SCORE  " + score;
+        }
+        int hp = heroAircraft.getHp();
+        if (hp != hudHpCache) {
+            hudHpCache = hp;
+            hudInfoText = hudModeName + "  ·  生命 " + hp;
+        }
+        int energy = Math.min(heroAircraft.getEnergy(), 100);
+        boolean full = heroAircraft.isEnergyFull();
+        if (energy != hudEnergyCache || full != hudEnergyFullCache) {
+            hudEnergyCache = energy;
+            hudEnergyFullCache = full;
+            hudEnergyText = full ? "能量已满 · 技能就绪" : "能量 " + energy + " / 100";
+        }
+        int level = heroAircraft.getFirepowerLevel();
+        boolean overdrive = heroAircraft.isOverdriveActive();
+        if (level != hudTierCache || overdrive != hudOverdriveCache) {
+            hudTierCache = level;
+            hudOverdriveCache = overdrive;
+            hudTierText = overdrive
+                    ? "超载 MAX"
+                    : (heroAircraft.isMaxFirepower() ? "火力 MAX" : ("火力 LV." + level));
+        }
+    }
+
     private void paintScoreAndLife(Canvas canvas) {
+        updateHudTextCaches();
         final float left = 12f;
-        final float topMarginPx = 30f * getResources().getDisplayMetrics().density;
-        final float top = (topSafeInsetPx + topMarginPx) / scale;
+        final float top = (topSafeInsetPx + hudTopMarginPx) / scale;
         final float right = 268f;
         final float bottom = top + 140f;
         final float radius = 16f;
@@ -1294,12 +1385,11 @@ public abstract class BaseGame extends View {
         float x = left + 16f;
         paint.setColor(0xFFFFD54F);
         paint.setTextSize(24f);
-        canvas.drawText("SCORE  " + score, x, top + 32f, paint);
+        canvas.drawText(hudScoreText, x, top + 32f, paint);
 
         paint.setColor(0xFFAFC6E8);
         paint.setTextSize(13f);
-        canvas.drawText(difficulty.getDisplayName() + "  ·  生命 " + heroAircraft.getHp(),
-                x, top + 56f, paint);
+        canvas.drawText(hudInfoText, x, top + 56f, paint);
 
         float barTop = top + 68f;
         float barRight = right - 16f;
@@ -1315,13 +1405,8 @@ public abstract class BaseGame extends View {
         }
 
         paint.setTextSize(12f);
-        if (heroAircraft.isEnergyFull()) {
-            paint.setColor(0xFFFFA726);
-            canvas.drawText("能量已满 · 技能就绪", x, top + 98f, paint);
-        } else {
-            paint.setColor(0xFF8EE8FF);
-            canvas.drawText("能量 " + energy + " / 100", x, top + 98f, paint);
-        }
+        paint.setColor(heroAircraft.isEnergyFull() ? 0xFFFFA726 : 0xFF8EE8FF);
+        canvas.drawText(hudEnergyText, x, top + 98f, paint);
 
         // 5 阶火力灯条（LV.1 ~ MAX / 超载）
         int firepowerLv = heroAircraft.getFirepowerLevel();
@@ -1329,13 +1414,10 @@ public abstract class BaseGame extends View {
         int tierColor = (overdrive || heroAircraft.isMaxFirepower())
                 ? 0xFFFFB300
                 : (firepowerLv >= 3 ? 0xFF2EE59D : 0xFF4DD0E1);
-        String tierLabel = overdrive
-                ? "超载 MAX"
-                : (heroAircraft.isMaxFirepower() ? "火力 MAX" : ("火力 LV." + firepowerLv));
 
         paint.setColor(tierColor);
         paint.setTextSize(12f);
-        canvas.drawText(tierLabel, x, top + 123f, paint);
+        canvas.drawText(hudTierText, x, top + 123f, paint);
 
         float segAreaLeft = x + 68f;
         float segGap = 4f;

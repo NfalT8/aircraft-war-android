@@ -6,10 +6,17 @@ import edu.hitsz.bullet.BaseBullet;
 import edu.hitsz.bullet.EnemyBullet;
 import edu.hitsz.bullet.HeroBullet;
 
+import java.util.ArrayList;
 import java.util.List;
 
 public interface ShootStrategy {
-    List<BaseBullet> shoot(AbstractAircraft aircraft);
+    void shootInto(AbstractAircraft aircraft, List<BaseBullet> out);
+
+    default List<BaseBullet> shoot(AbstractAircraft aircraft) {
+        List<BaseBullet> out = new ArrayList<>();
+        shootInto(aircraft, out);
+        return out;
+    }
     default BaseBullet createBullet(AbstractAircraft aircraft, int x, int y, int speedX, int speedY, int power){
         int actualPower = power > 0 ? power : aircraft.getPower();
         if(aircraft instanceof HeroAircraft){

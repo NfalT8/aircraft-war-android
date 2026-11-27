@@ -6,7 +6,7 @@ import edu.hitsz.bullet.BaseBullet;
 import edu.hitsz.basic.AbstractFlyingObject;
 import edu.hitsz.strategy.ShootStrategy;
 
-import java.util.LinkedList;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -134,16 +134,18 @@ public abstract class AbstractAircraft extends AbstractFlyingObject {
         this.strategy = strategy;
     }
     /**
-     * 飞机射击方法
-     * @return
-     *  可射击对象需实现，返回子弹列表
-     *  非可射击对象空实现，返回空列表
+     * 飞机射击方法：将本帧子弹追加到已有列表，避免每次射击创建中间列表。
      */
-    public List<BaseBullet> shoot(){
-        if(this.strategy == null){
-            return new LinkedList<>();
+    public void shootInto(List<BaseBullet> out) {
+        if (this.strategy != null) {
+            this.strategy.shootInto(this, out);
         }
-        return this.strategy.shoot(this);
+    }
+
+    public List<BaseBullet> shoot() {
+        List<BaseBullet> out = new ArrayList<>();
+        shootInto(out);
+        return out;
     }
 
 }

@@ -29,6 +29,8 @@ public class GameEffects {
     private static final int MAX_RINGS = 28;
     private static final int MAX_FLOATING_TEXTS = 14;
     private static final int FROST_MOTE_COUNT = 26;
+    private static final int[] EXPLOSION_PALETTE =
+            {0xFFFFFFFF, 0xFFFFF176, 0xFFFFB74D, 0xFFFF7043, 0xFFFF5252};
 
     private static final class Particle {
         boolean active;
@@ -511,13 +513,12 @@ public class GameEffects {
                                          float minSpeed, float maxSpeed,
                                          float minSize, float maxSize,
                                          float minLife, float maxLife) {
-        int[] palette = {0xFFFFFFFF, 0xFFFFF176, 0xFFFFB74D, 0xFFFF7043, 0xFFFF5252};
         for (int i = 0; i < count; i++) {
             float angle = random.nextFloat() * 6.283185f;
             float speed = minSpeed + random.nextFloat() * (maxSpeed - minSpeed);
             float size = minSize + random.nextFloat() * (maxSize - minSize);
             float life = minLife + random.nextFloat() * (maxLife - minLife);
-            int color = palette[random.nextInt(palette.length)];
+            int color = EXPLOSION_PALETTE[random.nextInt(EXPLOSION_PALETTE.length)];
             boolean isSpark = (i % 3 == 0);
             spawnParticle(
                     x + (random.nextFloat() - 0.5f) * 10f,

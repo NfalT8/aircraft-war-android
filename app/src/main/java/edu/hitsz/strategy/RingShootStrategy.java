@@ -4,13 +4,11 @@ import edu.hitsz.aircraft.AbstractAircraft;
 import edu.hitsz.aircraft.HeroAircraft;
 import edu.hitsz.bullet.BaseBullet;
 
-import java.util.LinkedList;
 import java.util.List;
 
 public class RingShootStrategy implements ShootStrategy{
     @Override
-    public List<BaseBullet> shoot(AbstractAircraft aircraft){
-        List<BaseBullet> res = new LinkedList<>();
+    public void shootInto(AbstractAircraft aircraft, List<BaseBullet> out){
         boolean isHero = aircraft instanceof HeroAircraft;
         int x = aircraft.getLocationX();
         int y = aircraft.getLocationY();
@@ -23,8 +21,7 @@ public class RingShootStrategy implements ShootStrategy{
             int speedX = (int) Math.round(speed * Math.cos(angle));
             int speedY = (int) Math.round(speed * Math.sin(angle));
 
-            res.add(createBullet(aircraft,x,y,speedX,speedY,ringPower));
+            out.add(createBullet(aircraft,x,y,speedX,speedY,ringPower));
         }
-        return res;
     }
 }

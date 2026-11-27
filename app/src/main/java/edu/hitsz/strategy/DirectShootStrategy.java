@@ -3,15 +3,12 @@ package edu.hitsz.strategy;
 import edu.hitsz.aircraft.AbstractAircraft;
 import edu.hitsz.aircraft.HeroAircraft;
 import edu.hitsz.bullet.BaseBullet;
-import edu.hitsz.bullet.HeroBullet;
 
-import java.util.LinkedList;
 import java.util.List;
 
 public class DirectShootStrategy implements ShootStrategy{
     @Override
-    public List<BaseBullet> shoot(AbstractAircraft aircraft){
-        List<BaseBullet> res = new LinkedList<>();
+    public void shootInto(AbstractAircraft aircraft, List<BaseBullet> out){
         boolean isHero = aircraft instanceof HeroAircraft;
         int direction = isHero ? -1 : 1;
         int x = aircraft.getLocationX();
@@ -22,7 +19,6 @@ public class DirectShootStrategy implements ShootStrategy{
         int speedY = isHero ? -20 : aircraft.getSpeedY() + direction * 5;
         int cpower = aircraft.getPower();
 
-        res.add(createBullet(aircraft, x, y, speedX, speedY, cpower));
-        return res;
+        out.add(createBullet(aircraft, x, y, speedX, speedY, cpower));
     }
 }

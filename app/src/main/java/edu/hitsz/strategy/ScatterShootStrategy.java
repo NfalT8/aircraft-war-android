@@ -3,15 +3,12 @@ package edu.hitsz.strategy;
 import edu.hitsz.aircraft.AbstractAircraft;
 import edu.hitsz.aircraft.HeroAircraft;
 import edu.hitsz.bullet.BaseBullet;
-import edu.hitsz.bullet.EnemyBullet;
 
-import java.util.LinkedList;
 import java.util.List;
 
 public class ScatterShootStrategy implements ShootStrategy{
     @Override
-    public List<BaseBullet> shoot(AbstractAircraft aircraft) {
-        List<BaseBullet> res = new LinkedList<>();
+    public void shootInto(AbstractAircraft aircraft, List<BaseBullet> out) {
         boolean isHero = aircraft instanceof HeroAircraft;
         int cpower = aircraft.getPower();
         int scatterPower = Math.max(1, Math.round(cpower * 0.75f));
@@ -24,10 +21,8 @@ public class ScatterShootStrategy implements ShootStrategy{
         int speedY = isHero ? -20 : aircraft.getSpeedY() + direction * 5;
         int spreadX = isHero ? 4 : 2;
 
-        res.add(createBullet(aircraft, x - (isHero ? 8 : 0), y, -spreadX, speedY, scatterPower));
-        res.add(createBullet(aircraft, x, y, 0, speedY, scatterPower));
-        res.add(createBullet(aircraft, x + (isHero ? 8 : 0), y, spreadX, speedY, scatterPower));
-
-        return res;
+        out.add(createBullet(aircraft, x - (isHero ? 8 : 0), y, -spreadX, speedY, scatterPower));
+        out.add(createBullet(aircraft, x, y, 0, speedY, scatterPower));
+        out.add(createBullet(aircraft, x + (isHero ? 8 : 0), y, spreadX, speedY, scatterPower));
     }
 }
